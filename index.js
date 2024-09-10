@@ -25,7 +25,10 @@ async function run() {
     // Connect the client to the server	(optional starting in v4.7)
     await client.connect();
     const usersCollection = client.db("assignment12").collection("users");
-
+    const teacherRequestCollection = client
+      .db("assignment12")
+      .collection("teacherRequest");
+    //user related  apis
     app.post("/users", async (req, res) => {
       const user = req.body;
       console.log("user--->", user);
@@ -41,7 +44,7 @@ async function run() {
       const result = await usersCollection.find().toArray();
       res.send(result);
     });
-    //user related  apis
+
     app.delete("/users/:id", async (req, res) => {
       const id = req.params.id;
       const query = { _id: new ObjectId(id) };
@@ -58,6 +61,73 @@ async function run() {
       };
       const result = await usersCollection.updateOne(query, updatedDoc);
       res.send(result);
+    });
+    //teacher related api
+    app.post("/teacherRequest", async (req, res) => {
+      const request = req.body;
+      const result = await teacherRequestCollection.insertOne(request);
+      res.send(result);
+    });
+    app.get("/teacherRequest", async (req, res) => {
+      const result = await teacherRequestCollection.find().toArray();
+      res.send(result);
+    });
+    app.patch("/teacherRequest/reject/:id", async (req, res) => {
+      const id = req.params.id;
+      const query = { _id: new ObjectId(id) };
+      const updatedDoc = {
+        $set: {
+          status: "rejected",
+        },
+      };
+      const result = await teacherRequestCollection.updateOne(
+        query,
+        updatedDoc
+      );
+      res.send(result);
+    });
+    //set the status to approved
+    app.patch("/teacherRequest/approve/:id", async (req, res) => {
+      const id = req.params.id;
+      const query = { _id: new ObjectId(id) };
+      const updatedDoc = {
+        $set: {
+          status: "approved",
+        },
+      };
+      const result = await teacherRequestCollection.updateOne(
+        query,
+        updatedDoc
+      );
+
+      res.send(result);
+    });
+
+    app.get("/teachers", async (req, res) => {
+      const result = await teacherCollection.find().toArray();
+      res.send(result);
+    });
+    app.get("/users/teacher/:email", async (req, res) => {
+      const email = req.params.email;
+      const query = { email: email };
+      const user = await teacherRequestCollection.findOne(query);
+      let teacher = false;
+      if (user) {
+        teacher = user.status === "approved";
+      }
+      res.send({ teacher });
+    });
+
+    //admin related apis
+    app.get("/users/admin/:email", async (req, res) => {
+      const email = req.params.email;
+      const query = { email: email };
+      const user = await usersCollection.findOne(query);
+      let admin = false;
+      if (user) {
+        admin = user?.role === "admin";
+      }
+      res.send({ admin });
     });
     await client.db("admin").command({ ping: 1 });
     console.log(
