@@ -65,6 +65,14 @@ async function run() {
     //teacher related api
     app.post("/teacherRequest", async (req, res) => {
       const request = req.body;
+      const email = request.email;
+      const filter = { email: email };
+      const existingRequest = await teacherRequestCollection.findOne(filter);
+      if (existingRequest) {
+        const deleteLastRequest = await teacherRequestCollection.deleteOne(
+          filter
+        );
+      }
       const result = await teacherRequestCollection.insertOne(request);
       res.send(result);
     });
@@ -111,11 +119,17 @@ async function run() {
       const email = req.params.email;
       const query = { email: email };
       const user = await teacherRequestCollection.findOne(query);
-      let teacher = false;
       if (user) {
-        teacher = user.status === "approved";
+        // If the user exists but no status is set, return "pending"
+        if (!user.status) {
+          return res.send({ status: "pending" });
+        }
+        // If user exists and status is set, return the actual status
+        return res.send({ status: user.status });
       }
-      res.send({ teacher });
+
+      // If no user is found, return "not_found"
+      return res.send({ status: "not_found" });
     });
 
     //admin related apis
