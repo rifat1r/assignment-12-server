@@ -4,6 +4,7 @@ require("dotenv").config();
 const app = express();
 const port = process.env.PORT || 5000;
 const stripe = require("stripe")(process.env.STRIPE_SECRET_KEY);
+const jwt = require("jsonwebtoken");
 
 //middleware
 app.use(cors());
@@ -31,9 +32,14 @@ async function run() {
       .db("assignment12")
       .collection("teacherRequest");
     const classCollection = client.db("assignment12").collection("classes");
-    const paymentCollection = client
+    const paymentCollection = client.db("assignment12").collection("payments");
+    const assignmentCollection = client
       .db("assignment12")
-      .collection("paymentCollection");
+      .collection("assignments");
+    const assignmentSubmissionCollection = client
+      .db("assignment12")
+      .collection("assignmentSubmission");
+    const reviewCollection = client.db("assignment12").collection("reviews");
     //user related  apis
     app.post("/users", async (req, res) => {
       const user = req.body;
@@ -151,7 +157,7 @@ async function run() {
       const result = await classCollection.insertOne(classs);
       res.send(result);
     });
-    app.get("/class", async (req, res) => {
+    app.get("/allClass", async (req, res) => {
       const result = await classCollection.find().toArray();
       res.send(result);
     });
@@ -171,8 +177,13 @@ async function run() {
       const result = await classCollection.updateOne(query, updatedDoc);
       res.send(result);
     });
-    app.get("/allClass", async (req, res) => {
+    app.get("/class", async (req, res) => {
       const query = { status: "approved" };
+      console.log("query", query);
+      if (req.query?.category !== "All") {
+        query.category = req.query.category;
+      }
+
       const result = await classCollection.find(query).toArray();
       res.send(result);
     });
@@ -216,21 +227,106 @@ async function run() {
       const result = await classCollection.deleteOne(query);
       res.send(result);
     });
-    // app.get("/users/class/:email", async (req, res) => {
-    //   const email = req.params.email;
-    //   const query = { email: email };
-    //   const user = await teacherRequestCollection.findOne(query);
-    //   if (user) {
-    //     // If the user exists but no status is set, return "pending"
-    //     if (!user.status) {
-    //       return res.send({ status: "pending" });
-    //     }
-    //     // If user exists and status is set, return the actual status
-    //     return res.send({ status: user.status });
-    //   }
+    //get enrolled class for specific users
+    app.get("/student/:email", async (req, res) => {
+      const email = req.params.email;
+      const query = { email: email };
+      const options = {
+        projection: {
+          _id: 0,
+          classId: 1,
+        },
+      };
+      const classesId = await paymentCollection.find(query, options).toArray();
+      const ids = classesId.map((item) => new ObjectId(item.classId));
+      const filter = { _id: { $in: ids } };
+      const options2 = {
+        projection: {
+          name: 1,
+          title: 1,
+          image: 1,
+        },
+      };
+      const result = await classCollection.find(filter, options2).toArray();
+      res.send({ classesId, result });
+    });
+    app.post("/assignment", async (req, res) => {
+      const assignment = req.body;
+      const result = await assignmentCollection.insertOne(assignment);
+      res.send(result);
+    });
+    app.get("/assignment/:id", async (req, res) => {
+      const id = req.params.id;
+      const query = { classId: id };
+      const result = await assignmentCollection.find(query).toArray();
+      res.send(result);
+    });
+    app.post("/submission", async (req, res) => {
+      const assignment = req.body;
+      const result = await assignmentSubmissionCollection.insertOne(assignment);
+      res.send(result);
+    });
+    app.get("/checkSubmission/:email", async (req, res) => {
+      const email = req.params.email;
+      const query = { email: email };
+      const options = {
+        projection: {
+          assignmentId: 1,
+        },
+      };
+      const result = await assignmentSubmissionCollection
+        .find(query, options)
+        .toArray();
+      res.send(result);
+    });
+    app.get("/checkEnrollment/:email", async (req, res) => {
+      const email = req.params.email;
+      const query = { email: email };
+      const options = {
+        projection: {
+          classId: 1,
+        },
+      };
+      const result = await paymentCollection.find(query, options).toArray();
+      res.send(result);
+    });
+    // reviews related apis
+    app.post("/reviews", async (req, res) => {
+      const review = req.body;
+      const result = await reviewCollection.insertOne(review);
+      res.send(result);
+    });
+    app.get("/reviews/:classId", async (req, res) => {
+      const classId = req.params.classId;
+      const query = { classId: classId };
+      const result = await reviewCollection.find(query).toArray();
+      res.send(result);
+    });
+    /*counting enrollments,assignments and asignment submissions*/
+    app.get("/teacher-stats/:id", async (req, res) => {
+      const id = req.params.id;
+      const query = { classId: id };
+      console.log("class id", id);
+      const enrollmentCount = await paymentCollection.countDocuments(query);
+      const assignmentCount = await assignmentCollection.countDocuments(query);
+      const assignmentSubmissionCount =
+        await assignmentSubmissionCollection.countDocuments(query);
+      res.send({ enrollmentCount, assignmentCount, assignmentSubmissionCount });
+    });
 
-    //   // If no user is found, return "not_found"
-    //   return res.send({ status: "not_found" });
+    // app.post("/submit", async (req, res) => {
+    //   const { email, ids } = req.body;
+
+    // });
+    // app.post("/checkEnrollment", async (req, res) => {
+    //   const { email, classId } = req.body;
+    //   const query = { email: email, classId: classId };
+    //   const isStudent = await paymentCollection.findOne(query);
+    //   if (isStudent) {
+    //     res.send(true);
+    //   } else {
+    //     res.send(false);
+    //   }
     // });
 
     //payment related apis
