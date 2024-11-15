@@ -74,6 +74,33 @@ async function run() {
       const result = await usersCollection.updateOne(query, updatedDoc);
       res.send(result);
     });
+    app.get("/users/:email", async (req, res) => {
+      const email = req.params.email;
+      const query = { email: email };
+      const result = await usersCollection.findOne(query);
+      res.send(result);
+    });
+    app.patch("/userInfo/:id", async (req, res) => {
+      const id = req.params.id;
+      const userInfo = req.body;
+      const query = { _id: new ObjectId(id) };
+      const existingImage = await usersCollection.findOne(query);
+      const options = { upsert: true };
+      const updatedDoc = {
+        $set: {
+          name: userInfo.name,
+          number: userInfo.number,
+          image: userInfo.image || existingImage.image,
+        },
+      };
+
+      const result = await usersCollection.updateOne(
+        query,
+        updatedDoc,
+        options
+      );
+      res.send(result);
+    });
     //teacher related api
     app.post("/teacherRequest", async (req, res) => {
       const request = req.body;
@@ -123,8 +150,18 @@ async function run() {
       res.send(result);
     });
 
-    app.get("/teachers", async (req, res) => {
-      const result = await teacherCollection.find().toArray();
+    app.get("/teachersStatus", async (req, res) => {
+      const query = { status: "approved" };
+      const options = {
+        projection: {
+          _id: 0,
+          email: 1,
+          status: 1,
+        },
+      };
+      const result = await teacherRequestCollection
+        .find(query, options)
+        .toArray();
       res.send(result);
     });
     app.get("/users/teacher/:email", async (req, res) => {
@@ -300,6 +337,10 @@ async function run() {
       const classId = req.params.classId;
       const query = { classId: classId };
       const result = await reviewCollection.find(query).toArray();
+      res.send(result);
+    });
+    app.get("/reviews", async (req, res) => {
+      const result = await reviewCollection.find().sort({ _id: -1 }).toArray();
       res.send(result);
     });
     /*counting enrollments,assignments and asignment submissions*/
