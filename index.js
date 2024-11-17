@@ -40,6 +40,48 @@ async function run() {
       .db("assignment12")
       .collection("assignmentSubmission");
     const reviewCollection = client.db("assignment12").collection("reviews");
+
+    //jwt related apis
+    app.post("/jwt", async (req, res) => {
+      const user = req.body;
+      const token = jwt.sign(user, "secret", {
+        expiresIn: "1h",
+      });
+      res.send({ token });
+    });
+    //middleware
+    const verifyToken = (req, res, next) => {
+      if (!req.headers.authorization) {
+        return res.status(401).send({ message: "not authorized" });
+      }
+      const token = req.headers.authorization.split(" ")[1];
+      jwt.verify(token, "secret", (err, decoded) => {
+        if (err) {
+          return res.status(401).send({ message: "unauthorized" });
+        }
+        req.decoded = decoded;
+        next();
+      });
+    };
+    const verifyAdmin = async (req, res, next) => {
+      const email = req.decoded.email;
+      const query = { email: email };
+      const user = await usersCollection.findOne(query);
+      // console.log("verifyAdmin", email, user);
+      if (user?.role !== "admin") {
+        return res.send({ message: " unauthorized" });
+      }
+      next();
+    };
+    const verifyTeacher = async (req, res, next) => {
+      const email = req.decoded.email;
+      const query = { email: email };
+      const user = await teacherRequestCollection.findOne(query);
+      if (user?.status !== "approved") {
+        return res.status(403).send({ message: "unauthorized" });
+      }
+      next();
+    };
     //user related  apis
     app.post("/users", async (req, res) => {
       const user = req.body;
@@ -52,18 +94,18 @@ async function run() {
       const result = await usersCollection.insertOne(user);
       res.send(result);
     });
-    app.get("/users", async (req, res) => {
+    app.get("/users", verifyToken, verifyAdmin, async (req, res) => {
       const result = await usersCollection.find().toArray();
       res.send(result);
     });
 
-    app.delete("/users/:id", async (req, res) => {
+    app.delete("/users/:id", verifyToken, verifyAdmin, async (req, res) => {
       const id = req.params.id;
       const query = { _id: new ObjectId(id) };
       const result = await usersCollection.deleteOne(query);
       res.send(result);
     });
-    app.patch("/users/:id", async (req, res) => {
+    app.patch("/users/:id", verifyToken, verifyAdmin, async (req, res) => {
       const id = req.params.id;
       const query = { _id: new ObjectId(id) };
       const updatedDoc = {
@@ -74,13 +116,16 @@ async function run() {
       const result = await usersCollection.updateOne(query, updatedDoc);
       res.send(result);
     });
-    app.get("/users/:email", async (req, res) => {
+    app.get("/users/:email", verifyToken, async (req, res) => {
       const email = req.params.email;
       const query = { email: email };
+      if (email !== req.decoded.email) {
+        return res.status(401).send({ message: "unauthorized access" });
+      }
       const result = await usersCollection.findOne(query);
       res.send(result);
     });
-    app.patch("/userInfo/:id", async (req, res) => {
+    app.patch("/userInfo/:id", verifyToken, async (req, res) => {
       const id = req.params.id;
       const userInfo = req.body;
       const query = { _id: new ObjectId(id) };
@@ -102,7 +147,7 @@ async function run() {
       res.send(result);
     });
     //teacher related api
-    app.post("/teacherRequest", async (req, res) => {
+    app.post("/teacherRequest", verifyToken, async (req, res) => {
       const request = req.body;
       const email = request.email;
       const filter = { email: email };
@@ -115,42 +160,52 @@ async function run() {
       const result = await teacherRequestCollection.insertOne(request);
       res.send(result);
     });
-    app.get("/teacherRequest", async (req, res) => {
+    app.get("/teacherRequest", verifyToken, verifyAdmin, async (req, res) => {
       const result = await teacherRequestCollection.find().toArray();
       res.send(result);
     });
-    app.patch("/teacherRequest/reject/:id", async (req, res) => {
-      const id = req.params.id;
-      const query = { _id: new ObjectId(id) };
-      const updatedDoc = {
-        $set: {
-          status: "rejected",
-        },
-      };
-      const result = await teacherRequestCollection.updateOne(
-        query,
-        updatedDoc
-      );
-      res.send(result);
-    });
+    app.patch(
+      "/teacherRequest/reject/:id",
+      verifyToken,
+      verifyAdmin,
+      async (req, res) => {
+        const id = req.params.id;
+        const query = { _id: new ObjectId(id) };
+        const updatedDoc = {
+          $set: {
+            status: "rejected",
+          },
+        };
+        const result = await teacherRequestCollection.updateOne(
+          query,
+          updatedDoc
+        );
+        res.send(result);
+      }
+    );
     //set the status to approved
-    app.patch("/teacherRequest/approve/:id", async (req, res) => {
-      const id = req.params.id;
-      const query = { _id: new ObjectId(id) };
-      const updatedDoc = {
-        $set: {
-          status: "approved",
-        },
-      };
-      const result = await teacherRequestCollection.updateOne(
-        query,
-        updatedDoc
-      );
+    app.patch(
+      "/teacherRequest/approve/:id",
+      verifyToken,
+      verifyAdmin,
+      async (req, res) => {
+        const id = req.params.id;
+        const query = { _id: new ObjectId(id) };
+        const updatedDoc = {
+          $set: {
+            status: "approved",
+          },
+        };
+        const result = await teacherRequestCollection.updateOne(
+          query,
+          updatedDoc
+        );
 
-      res.send(result);
-    });
+        res.send(result);
+      }
+    );
 
-    app.get("/teachersStatus", async (req, res) => {
+    app.get("/teachersStatus", verifyToken, async (req, res) => {
       const query = { status: "approved" };
       const options = {
         projection: {
@@ -164,7 +219,7 @@ async function run() {
         .toArray();
       res.send(result);
     });
-    app.get("/users/teacher/:email", async (req, res) => {
+    app.get("/users/teacher/:email", verifyToken, async (req, res) => {
       const email = req.params.email;
       const query = { email: email };
       const user = await teacherRequestCollection.findOne(query);
@@ -181,7 +236,7 @@ async function run() {
       return res.send({ status: "not_found" });
     });
 
-    app.get("/teacher/:email", async (req, res) => {
+    app.get("/teacher/:email", verifyToken, async (req, res) => {
       const email = req.params.email;
       const query = { email: email };
       const result = await teacherRequestCollection.findOne(query);
@@ -189,7 +244,7 @@ async function run() {
     });
 
     //class related apis
-    app.post("/class", async (req, res) => {
+    app.post("/class", verifyToken, verifyTeacher, async (req, res) => {
       const classs = req.body;
       const result = await classCollection.insertOne(classs);
       res.send(result);
@@ -198,7 +253,7 @@ async function run() {
       const result = await classCollection.find().toArray();
       res.send(result);
     });
-    app.patch("/class/:id", async (req, res) => {
+    app.patch("/class/:id", verifyToken, verifyTeacher, async (req, res) => {
       const id = req.params.id;
       const aClass = req.body;
       const query = { _id: new ObjectId(id) };
@@ -224,49 +279,65 @@ async function run() {
       const result = await classCollection.find(query).toArray();
       res.send(result);
     });
-    app.patch("/class/approve/:id", async (req, res) => {
-      const id = req.params.id;
-      const query = { _id: new ObjectId(id) };
-      const updatedDoc = {
-        $set: {
-          status: "approved",
-        },
-      };
-      const result = await classCollection.updateOne(query, updatedDoc);
-      res.send(result);
-    });
-    app.patch("/class/reject/:id", async (req, res) => {
-      const id = req.params.id;
-      const query = { _id: new ObjectId(id) };
-      const updatedDoc = {
-        $set: {
-          status: "rejected",
-        },
-      };
-      const result = await classCollection.updateOne(query, updatedDoc);
-      res.send(result);
-    });
-    app.get("/classes/:email", async (req, res) => {
+    app.patch(
+      "/class/approve/:id",
+      verifyToken,
+      verifyAdmin,
+      async (req, res) => {
+        const id = req.params.id;
+        const query = { _id: new ObjectId(id) };
+        const updatedDoc = {
+          $set: {
+            status: "approved",
+          },
+        };
+        const result = await classCollection.updateOne(query, updatedDoc);
+        res.send(result);
+      }
+    );
+    app.patch(
+      "/class/reject/:id",
+      verifyToken,
+      verifyAdmin,
+      async (req, res) => {
+        const id = req.params.id;
+        const query = { _id: new ObjectId(id) };
+        const updatedDoc = {
+          $set: {
+            status: "rejected",
+          },
+        };
+        const result = await classCollection.updateOne(query, updatedDoc);
+        res.send(result);
+      }
+    );
+    app.get("/classes/:email", verifyToken, async (req, res) => {
       const email = req.params.email;
+      if (email !== req.decoded.email) {
+        return res.status(403).send({ message: "unauthoriized access" });
+      }
       const query = { email: email };
       const result = await classCollection.find(query).toArray();
       res.send(result);
     });
-    app.get("/class/:id", async (req, res) => {
+    app.get("/class/:id", verifyToken, async (req, res) => {
       const id = req.params.id;
       const query = { _id: new ObjectId(id) };
       const result = await classCollection.findOne(query);
       res.send(result);
     });
-    app.delete("/class/:id", async (req, res) => {
+    app.delete("/class/:id", verifyToken, verifyTeacher, async (req, res) => {
       const id = req.params.id;
       const query = { _id: new ObjectId(id) };
       const result = await classCollection.deleteOne(query);
       res.send(result);
     });
     //get enrolled class for specific users
-    app.get("/student/:email", async (req, res) => {
+    app.get("/student/:email", verifyToken, async (req, res) => {
       const email = req.params.email;
+      if (email !== req.decoded.email) {
+        return res.status(403).send({ message: "unauthoriized access" });
+      }
       const query = { email: email };
       const options = {
         projection: {
@@ -287,24 +358,27 @@ async function run() {
       const result = await classCollection.find(filter, options2).toArray();
       res.send({ classesId, result });
     });
-    app.post("/assignment", async (req, res) => {
+    app.post("/assignment", verifyToken, verifyTeacher, async (req, res) => {
       const assignment = req.body;
       const result = await assignmentCollection.insertOne(assignment);
       res.send(result);
     });
-    app.get("/assignment/:id", async (req, res) => {
+    app.get("/assignment/:id", verifyToken, async (req, res) => {
       const id = req.params.id;
       const query = { classId: id };
       const result = await assignmentCollection.find(query).toArray();
       res.send(result);
     });
-    app.post("/submission", async (req, res) => {
+    app.post("/submission", verifyToken, async (req, res) => {
       const assignment = req.body;
       const result = await assignmentSubmissionCollection.insertOne(assignment);
       res.send(result);
     });
-    app.get("/checkSubmission/:email", async (req, res) => {
+    app.get("/checkSubmission/:email", verifyToken, async (req, res) => {
       const email = req.params.email;
+      if (email !== req.decoded.email) {
+        return res.status(403).send({ message: "unauthoriized access" });
+      }
       const query = { email: email };
       const options = {
         projection: {
@@ -318,6 +392,7 @@ async function run() {
     });
     app.get("/checkEnrollment/:email", async (req, res) => {
       const email = req.params.email;
+
       const query = { email: email };
       const options = {
         projection: {
@@ -328,7 +403,7 @@ async function run() {
       res.send(result);
     });
     // reviews related apis
-    app.post("/reviews", async (req, res) => {
+    app.post("/reviews", verifyToken, async (req, res) => {
       const review = req.body;
       const result = await reviewCollection.insertOne(review);
       res.send(result);
@@ -344,16 +419,27 @@ async function run() {
       res.send(result);
     });
     /*counting enrollments,assignments and asignment submissions*/
-    app.get("/teacher-stats/:id", async (req, res) => {
-      const id = req.params.id;
-      const query = { classId: id };
-      console.log("class id", id);
-      const enrollmentCount = await paymentCollection.countDocuments(query);
-      const assignmentCount = await assignmentCollection.countDocuments(query);
-      const assignmentSubmissionCount =
-        await assignmentSubmissionCollection.countDocuments(query);
-      res.send({ enrollmentCount, assignmentCount, assignmentSubmissionCount });
-    });
+    app.get(
+      "/teacher-stats/:id",
+      verifyToken,
+      verifyTeacher,
+      async (req, res) => {
+        const id = req.params.id;
+        const query = { classId: id };
+        console.log("class id", id);
+        const enrollmentCount = await paymentCollection.countDocuments(query);
+        const assignmentCount = await assignmentCollection.countDocuments(
+          query
+        );
+        const assignmentSubmissionCount =
+          await assignmentSubmissionCollection.countDocuments(query);
+        res.send({
+          enrollmentCount,
+          assignmentCount,
+          assignmentSubmissionCount,
+        });
+      }
+    );
 
     // app.post("/submit", async (req, res) => {
     //   const { email, ids } = req.body;
@@ -371,7 +457,7 @@ async function run() {
     // });
 
     //payment related apis
-    app.post("/create-payment-intent", async (req, res) => {
+    app.post("/create-payment-intent", verifyToken, async (req, res) => {
       const { price } = req.body;
       const amount = parseInt(price * 100);
       const paymentIntent = await stripe.paymentIntents.create({
@@ -383,22 +469,27 @@ async function run() {
         clientSecret: paymentIntent.client_secret,
       });
     });
-    app.post("/payment", async (req, res) => {
+    app.post("/payment", verifyToken, async (req, res) => {
       const payment = req.body;
       const paymentResult = await paymentCollection.insertOne(payment);
       res.send(paymentResult);
     });
     //admin related apis
-    app.get("/users/admin/:email", async (req, res) => {
-      const email = req.params.email;
-      const query = { email: email };
-      const user = await usersCollection.findOne(query);
-      let admin = false;
-      if (user) {
-        admin = user?.role === "admin";
+    app.get(
+      "/users/admin/:email",
+      verifyToken,
+      verifyAdmin,
+      async (req, res) => {
+        const email = req.params.email;
+        const query = { email: email };
+        const user = await usersCollection.findOne(query);
+        let admin = false;
+        if (user) {
+          admin = user?.role === "admin";
+        }
+        res.send({ admin });
       }
-      res.send({ admin });
-    });
+    );
     await client.db("admin").command({ ping: 1 });
     console.log(
       "Pinged your deployment. You successfully connected to MongoDB!"
