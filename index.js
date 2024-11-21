@@ -40,11 +40,14 @@ async function run() {
       .db("assignment12")
       .collection("assignmentSubmission");
     const reviewCollection = client.db("assignment12").collection("reviews");
+    const bannerImageCollection = client
+      .db("assignment12")
+      .collection("bannerImages");
 
     //jwt related apis
     app.post("/jwt", async (req, res) => {
       const user = req.body;
-      const token = jwt.sign(user, "secret", {
+      const token = jwt.sign(user, process.env.ACCESS_TOKEN_SECRET, {
         expiresIn: "1h",
       });
       res.send({ token });
@@ -55,7 +58,7 @@ async function run() {
         return res.status(401).send({ message: "not authorized" });
       }
       const token = req.headers.authorization.split(" ")[1];
-      jwt.verify(token, "secret", (err, decoded) => {
+      jwt.verify(token, process.env.ACCESS_TOKEN_SECRET, (err, decoded) => {
         if (err) {
           return res.status(401).send({ message: "unauthorized" });
         }
@@ -85,7 +88,7 @@ async function run() {
     //user related  apis
     app.post("/users", async (req, res) => {
       const user = req.body;
-      console.log("user--->", user);
+
       const query = { email: user.email };
       const existingUser = await usersCollection.findOne(query);
       if (existingUser) {
@@ -94,8 +97,13 @@ async function run() {
       const result = await usersCollection.insertOne(user);
       res.send(result);
     });
+    // const query = {
+    //   status: "approved",
+    //   title: { $regex: req.query.search, $options: "i" },
+    // };
     app.get("/users", verifyToken, verifyAdmin, async (req, res) => {
-      const result = await usersCollection.find().toArray();
+      const query = { name: { $regex: req.query.search, $options: "i" } };
+      const result = await usersCollection.find(query).toArray();
       res.send(result);
     });
 
@@ -229,7 +237,7 @@ async function run() {
           return res.send({ status: "pending" });
         }
         // If user exists and status is set, return the actual status
-        return res.send({ status: user.status });
+        return res.send({ status: user.status, category: user.category });
       }
 
       // If no user is found, return "not_found"
@@ -270,15 +278,25 @@ async function run() {
       res.send(result);
     });
     app.get("/class", async (req, res) => {
-      const query = { status: "approved" };
-      console.log("query", query);
-      if (req.query?.category !== "All") {
+      const min = parseInt(req.query.min) || 0;
+      const max = parseInt(req.query.max) || Infinity;
+
+      const query = {
+        status: "approved",
+        title: { $regex: req.query.search || "", $options: "i" },
+        price: { $lte: max, $gte: min }, //
+      };
+
+      if (req.query?.category && req.query.category !== "All") {
         query.category = req.query.category;
       }
+
+      console.log("Query:", query);
 
       const result = await classCollection.find(query).toArray();
       res.send(result);
     });
+
     app.patch(
       "/class/approve/:id",
       verifyToken,
@@ -475,21 +493,39 @@ async function run() {
       res.send(paymentResult);
     });
     //admin related apis
-    app.get(
-      "/users/admin/:email",
-      verifyToken,
-      verifyAdmin,
-      async (req, res) => {
-        const email = req.params.email;
-        const query = { email: email };
-        const user = await usersCollection.findOne(query);
-        let admin = false;
-        if (user) {
-          admin = user?.role === "admin";
-        }
-        res.send({ admin });
+    app.get("/users/admin/:email", verifyToken, async (req, res) => {
+      const email = req.params.email;
+      const query = { email: email };
+      const user = await usersCollection.findOne(query);
+      let admin = false;
+      if (user) {
+        admin = user?.role === "admin";
       }
-    );
+      console.log("isAdmin", admin);
+      res.send({ admin });
+    });
+    app.get("/adminStatus", verifyToken, async (req, res) => {
+      const query = { role: "admin" };
+      const options = {
+        projection: {
+          _id: 0,
+          email: 1,
+          role: 1,
+        },
+      };
+      const result = await usersCollection.find(query, options).toArray();
+      res.send(result);
+    });
+    app.post("/bannerImage", verifyToken, verifyAdmin, async (req, res) => {
+      const image = req.body;
+      const result = await bannerImageCollection.insertOne(image);
+      res.send(result);
+    });
+    app.get("/bannerImage", async (req, res) => {
+      const result = await bannerImageCollection.find().toArray();
+      res.send(result);
+    });
+    app.get();
     await client.db("admin").command({ ping: 1 });
     console.log(
       "Pinged your deployment. You successfully connected to MongoDB!"
