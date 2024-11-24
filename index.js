@@ -280,6 +280,9 @@ async function run() {
     app.get("/class", async (req, res) => {
       const min = parseInt(req.query.min) || 0;
       const max = parseInt(req.query.max) || Infinity;
+      const page = req.query.category === "All" ? parseInt(req.query.page) : 0;
+      const size =
+        req.query.category === "All" ? parseInt(req.query.size) : Infinity;
 
       const query = {
         status: "approved",
@@ -292,9 +295,13 @@ async function run() {
       }
 
       console.log("Query:", query);
-
-      const result = await classCollection.find(query).toArray();
-      res.send(result);
+      const classCount = await classCollection.countDocuments(query);
+      const result = await classCollection
+        .find(query)
+        .skip(page * size)
+        .limit(size)
+        .toArray();
+      res.send({ result, classCount });
     });
 
     app.patch(
