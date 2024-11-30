@@ -250,8 +250,172 @@ async function run() {
       const result = await teacherRequestCollection.findOne(query);
       res.send(result);
     });
+    // teacher stats
+    app.get("/teacher-home/:email", async (req, res) => {
+      const email = req.params.email;
+      const query = { email: email, status: "approved" };
+      const allClass = await classCollection.countDocuments({ email: email });
+      const classes = await classCollection.countDocuments(query);
+      const students = await classCollection
+        .aggregate([
+          { $match: query },
+          {
+            $lookup: {
+              from: "payments",
+              localField: "_id",
+              foreignField: "classId",
+              as: "enrollments",
+            },
+          },
+          {
+            $unwind: "$enrollments",
+          },
+          {
+            $group: {
+              _id: "$enrollments.email",
+              totalStudents: {
+                $sum: 1,
+              },
+            },
+          },
+        ])
+        .toArray();
+      const StudentCount = students.length > 0 ? students.length : 0;
+      const enrollmetCount = students.reduce(
+        (sum, student) => sum + student.totalStudents,
+        0
+      );
+      const classOverview = await classCollection
+        .aggregate([
+          { $match: query },
+          {
+            $lookup: {
+              from: "payments",
+              localField: "_id",
+              foreignField: "classId",
+              as: "enrollments",
+            },
+          },
+          {
+            $lookup: {
+              from: "reviews",
+              localField: "_id",
+              foreignField: "classId",
+              as: "reviews",
+            },
+          },
+          {
+            $lookup: {
+              from: "assignments",
+              localField: "_id",
+              foreignField: "classId",
+              as: "assignments",
+            },
+          },
+          {
+            $lookup: {
+              from: "assignmentSubmission",
+              localField: "_id",
+              foreignField: "classId",
+              as: "submissions",
+            },
+          },
+          {
+            $addFields: {
+              enrollmentCount: { $size: "$enrollments" },
+              reviewCount: {
+                $size: "$reviews",
+              },
+              averageRating: {
+                $avg: "$reviews.rating",
+              },
+              assignmentCount: {
+                $size: "$assignments",
+              },
+              submissionCount: {
+                $size: "$submissions",
+              },
+            },
+          },
+          {
+            $project: {
+              _id: 1,
+              title: 1,
+              enrollmentCount: 1,
+              reviewCount: 1,
+              averageRating: 1,
+              assignmentCount: 1,
+              submissionCount: 1,
+            },
+          },
+        ])
+        .toArray();
 
-    //class related apis
+      res.send({
+        allClass,
+        classes,
+        StudentCount,
+        enrollmetCount,
+        classOverview,
+        // classReviews,
+      });
+    });
+
+    /*****class related apis******/
+
+    //get top rated classes for featured class
+    app.get("/featuredClasses", async (req, res) => {
+      const classes = await classCollection
+        .aggregate([
+          {
+            $lookup: {
+              from: "reviews",
+              localField: "_id",
+              foreignField: "classId",
+              as: "reviewedClass",
+            },
+          },
+          {
+            $unwind: "$reviewedClass",
+          },
+          {
+            $group: {
+              _id: "$_id",
+              reviewCount: {
+                $sum: 1,
+              },
+              title: { $first: "$title" },
+              image: { $first: "$image" },
+              price: { $first: "$price" },
+              email: { $first: "$email" },
+              description: { $first: "$description" },
+              averageRating: {
+                $avg: "$reviewedClass.rating",
+              },
+            },
+          },
+          {
+            $lookup: {
+              from: "teacherRequest",
+              localField: "email",
+              foreignField: "email",
+              as: "teacher",
+            },
+          },
+          {
+            $unwind: "$teacher",
+          },
+          {
+            $sort: { averageRating: -1 },
+          },
+          {
+            $limit: 6,
+          },
+        ])
+        .toArray();
+      res.send(classes);
+    });
+
     app.post("/class", verifyToken, verifyTeacher, async (req, res) => {
       const classs = req.body;
       const result = await classCollection.insertOne(classs);
@@ -383,19 +547,22 @@ async function run() {
       const result = await classCollection.find(filter, options2).toArray();
       res.send({ classesId, result });
     });
+    /******assignment relared apis******/
     app.post("/assignment", verifyToken, verifyTeacher, async (req, res) => {
       const assignment = req.body;
+      assignment.classId = new ObjectId(assignment.classId);
       const result = await assignmentCollection.insertOne(assignment);
       res.send(result);
     });
     app.get("/assignment/:id", verifyToken, async (req, res) => {
       const id = req.params.id;
-      const query = { classId: id };
+      const query = { classId: new ObjectId(id) };
       const result = await assignmentCollection.find(query).toArray();
       res.send(result);
     });
     app.post("/submission", verifyToken, async (req, res) => {
       const assignment = req.body;
+      assignment.classId = new ObjectId(assignment.classId);
       const result = await assignmentSubmissionCollection.insertOne(assignment);
       res.send(result);
     });
@@ -430,6 +597,7 @@ async function run() {
     // reviews related apis
     app.post("/reviews", verifyToken, async (req, res) => {
       const review = req.body;
+      review.classId = new ObjectId(review.classId);
       const result = await reviewCollection.insertOne(review);
       res.send(result);
     });
@@ -446,13 +614,12 @@ async function run() {
     /*counting enrollments,assignments and asignment submissions*/
     app.get(
       "/teacher-stats/:id",
-      verifyToken,
-      verifyTeacher,
+
       async (req, res) => {
         const id = req.params.id;
-        const query = { classId: id };
-        console.log("class id", id);
+        const query = { classId: new ObjectId(id) };
         const enrollmentCount = await paymentCollection.countDocuments(query);
+        console.log("enrollment", enrollmentCount);
         const assignmentCount = await assignmentCollection.countDocuments(
           query
         );
@@ -465,21 +632,6 @@ async function run() {
         });
       }
     );
-
-    // app.post("/submit", async (req, res) => {
-    //   const { email, ids } = req.body;
-
-    // });
-    // app.post("/checkEnrollment", async (req, res) => {
-    //   const { email, classId } = req.body;
-    //   const query = { email: email, classId: classId };
-    //   const isStudent = await paymentCollection.findOne(query);
-    //   if (isStudent) {
-    //     res.send(true);
-    //   } else {
-    //     res.send(false);
-    //   }
-    // });
 
     //payment related apis
     app.post("/create-payment-intent", verifyToken, async (req, res) => {
@@ -496,6 +648,7 @@ async function run() {
     });
     app.post("/payment", verifyToken, async (req, res) => {
       const payment = req.body;
+      payment.classId = new ObjectId(payment.classId);
       const paymentResult = await paymentCollection.insertOne(payment);
       res.send(paymentResult);
     });
@@ -532,7 +685,76 @@ async function run() {
       const result = await bannerImageCollection.find().toArray();
       res.send(result);
     });
-    app.get();
+    app.get("/admin-stats", async (req, res) => {
+      const usersCount = await usersCollection.estimatedDocumentCount();
+      const classesCount = await classCollection.countDocuments({
+        status: "approved",
+      });
+      const teachersCount = await teacherRequestCollection.countDocuments({
+        status: "approved",
+      });
+      const totalEnrollment = await paymentCollection.estimatedDocumentCount();
+      const students = await paymentCollection
+        .aggregate([
+          {
+            $group: {
+              _id: "$email",
+            },
+          },
+          {
+            $count: "totalStudents",
+          },
+        ])
+        .toArray();
+      const totalStudents = students[0].totalStudents;
+      const revenue = await paymentCollection
+        .aggregate([
+          {
+            $group: {
+              _id: null,
+              totalRevenue: {
+                $sum: "$price",
+              },
+            },
+          },
+        ])
+        .toArray();
+
+      const totalRevenue = revenue[0]?.totalRevenue || 0;
+      //get enrollments and revenue for each category
+
+      const enrollment = await paymentCollection
+        .aggregate([
+          {
+            $lookup: {
+              from: "classes",
+              localField: "classId",
+              foreignField: "_id",
+              as: "matchedClass",
+            },
+          },
+          {
+            $unwind: "$matchedClass",
+          },
+          {
+            $group: {
+              _id: "$matchedClass.category",
+              enrollmentCount: { $sum: 1 },
+            },
+          },
+        ])
+        .toArray();
+      res.send({
+        totalRevenue,
+        usersCount,
+        classesCount,
+        teachersCount,
+        totalStudents,
+        totalEnrollment,
+        enrollment,
+      });
+      console.log("student count", totalRevenue);
+    });
     await client.db("admin").command({ ping: 1 });
     console.log(
       "Pinged your deployment. You successfully connected to MongoDB!"
