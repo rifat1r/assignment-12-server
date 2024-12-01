@@ -85,7 +85,7 @@ async function run() {
       }
       next();
     };
-    //user related  apis
+    /****user related  apis****/
     app.post("/users", async (req, res) => {
       const user = req.body;
 
@@ -154,7 +154,92 @@ async function run() {
       );
       res.send(result);
     });
-    //teacher related api
+    //student stats
+    app.get("/student-home/:email", async (req, res) => {
+      const email = req.params.email;
+      const query = { email: email };
+      const enrollmentCount = await paymentCollection.countDocuments(query);
+      const feedbackCount = await reviewCollection.countDocuments(query);
+      const stats = await paymentCollection
+        .aggregate([
+          {
+            $match: query,
+          },
+          {
+            $lookup: {
+              from: "classes",
+              localField: "classId",
+              foreignField: "_id",
+              as: "enrolledClass",
+            },
+          },
+          {
+            $unwind: "$enrolledClass",
+          },
+          {
+            $lookup: {
+              from: "teacherRequest",
+              localField: "enrolledClass.email",
+              foreignField: "email",
+              as: "teacher",
+            },
+          },
+          {
+            $unwind: "$teacher",
+          },
+          {
+            $lookup: {
+              from: "assignments",
+              localField: "enrolledClass._id",
+              foreignField: "classId",
+              as: "assignments",
+            },
+          },
+          {
+            $lookup: {
+              from: "assignmentSubmission",
+              localField: "enrolledClass._id",
+              foreignField: "classId",
+              as: "submissions",
+            },
+          },
+          {
+            $addFields: {
+              classId: "$enrolledClass._id",
+              title: "$enrolledClass.title",
+              image: "$enrolledClass.image",
+              teacherName: "$teacher.name",
+              assignmentCount: {
+                $size: "$assignments",
+              },
+              submissionCount: {
+                $size: {
+                  $filter: {
+                    input: "$submissions",
+                    as: "submission",
+                    cond: { $eq: ["$$submission.email", email] },
+                  },
+                },
+              },
+            },
+          },
+          {
+            $project: {
+              _id: 1,
+              classId: 1,
+              title: 1,
+              image: 1,
+              teacherName: 1,
+              assignmentCount: 1,
+              submissionCount: 1,
+            },
+          },
+        ])
+        .toArray();
+
+      res.send({ enrollmentCount, feedbackCount, stats });
+    });
+    /*******teacher related api*******/
     app.post("/teacherRequest", verifyToken, async (req, res) => {
       const request = req.body;
       const email = request.email;
@@ -341,6 +426,7 @@ async function run() {
             $project: {
               _id: 1,
               title: 1,
+              image: 1,
               enrollmentCount: 1,
               reviewCount: 1,
               averageRating: 1,
@@ -349,6 +435,7 @@ async function run() {
             },
           },
         ])
+
         .toArray();
 
       res.send({
@@ -357,7 +444,6 @@ async function run() {
         StudentCount,
         enrollmetCount,
         classOverview,
-        // classReviews,
       });
     });
 
@@ -685,7 +771,7 @@ async function run() {
       const result = await bannerImageCollection.find().toArray();
       res.send(result);
     });
-    app.get("/admin-stats", async (req, res) => {
+    app.get("/admin-stats", verifyToken, verifyAdmin, async (req, res) => {
       const usersCount = await usersCollection.estimatedDocumentCount();
       const classesCount = await classCollection.countDocuments({
         status: "approved",
