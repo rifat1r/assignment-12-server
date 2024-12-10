@@ -26,7 +26,7 @@ const client = new MongoClient(uri, {
 async function run() {
   try {
     // Connect the client to the server	(optional starting in v4.7)
-    await client.connect();
+    // await client.connect();
     const usersCollection = client.db("assignment12").collection("users");
     const teacherRequestCollection = client
       .db("assignment12")
@@ -44,11 +44,11 @@ async function run() {
       .db("assignment12")
       .collection("bannerImages");
 
-    //jwt related apis
+    /****jwt related apis****/
     app.post("/jwt", async (req, res) => {
       const user = req.body;
       const token = jwt.sign(user, process.env.ACCESS_TOKEN_SECRET, {
-        expiresIn: "1h",
+        expiresIn: "10h",
       });
       res.send({ token });
     });
@@ -155,8 +155,11 @@ async function run() {
       res.send(result);
     });
     //student stats
-    app.get("/student-home/:email", async (req, res) => {
+    app.get("/student-home/:email", verifyToken, async (req, res) => {
       const email = req.params.email;
+      if (req.decoded.email !== email) {
+        return res.status(403).send({ message: "unauthorized" });
+      }
       const query = { email: email };
       const enrollmentCount = await paymentCollection.countDocuments(query);
       const feedbackCount = await reviewCollection.countDocuments(query);
@@ -254,7 +257,10 @@ async function run() {
       res.send(result);
     });
     app.get("/teacherRequest", verifyToken, verifyAdmin, async (req, res) => {
-      const result = await teacherRequestCollection.find().toArray();
+      const result = await teacherRequestCollection
+        .find()
+        .sort({ _id: -1 })
+        .toArray();
       res.send(result);
     });
     app.patch(
@@ -335,117 +341,140 @@ async function run() {
       const result = await teacherRequestCollection.findOne(query);
       res.send(result);
     });
-    // teacher stats
-    app.get("/teacher-home/:email", async (req, res) => {
-      const email = req.params.email;
-      const query = { email: email, status: "approved" };
-      const allClass = await classCollection.countDocuments({ email: email });
-      const classes = await classCollection.countDocuments(query);
-      const students = await classCollection
-        .aggregate([
-          { $match: query },
-          {
-            $lookup: {
-              from: "payments",
-              localField: "_id",
-              foreignField: "classId",
-              as: "enrollments",
-            },
-          },
-          {
-            $unwind: "$enrollments",
-          },
-          {
-            $group: {
-              _id: "$enrollments.email",
-              totalStudents: {
-                $sum: 1,
-              },
-            },
-          },
-        ])
+    app.get("/teachers", async (req, res) => {
+      const result = await teacherRequestCollection
+        .find({
+          status: "approved",
+        })
         .toArray();
-      const StudentCount = students.length > 0 ? students.length : 0;
-      const enrollmetCount = students.reduce(
-        (sum, student) => sum + student.totalStudents,
-        0
-      );
-      const classOverview = await classCollection
-        .aggregate([
-          { $match: query },
-          {
-            $lookup: {
-              from: "payments",
-              localField: "_id",
-              foreignField: "classId",
-              as: "enrollments",
-            },
-          },
-          {
-            $lookup: {
-              from: "reviews",
-              localField: "_id",
-              foreignField: "classId",
-              as: "reviews",
-            },
-          },
-          {
-            $lookup: {
-              from: "assignments",
-              localField: "_id",
-              foreignField: "classId",
-              as: "assignments",
-            },
-          },
-          {
-            $lookup: {
-              from: "assignmentSubmission",
-              localField: "_id",
-              foreignField: "classId",
-              as: "submissions",
-            },
-          },
-          {
-            $addFields: {
-              enrollmentCount: { $size: "$enrollments" },
-              reviewCount: {
-                $size: "$reviews",
-              },
-              averageRating: {
-                $avg: "$reviews.rating",
-              },
-              assignmentCount: {
-                $size: "$assignments",
-              },
-              submissionCount: {
-                $size: "$submissions",
-              },
-            },
-          },
-          {
-            $project: {
-              _id: 1,
-              title: 1,
-              image: 1,
-              enrollmentCount: 1,
-              reviewCount: 1,
-              averageRating: 1,
-              assignmentCount: 1,
-              submissionCount: 1,
-            },
-          },
-        ])
-
-        .toArray();
-
-      res.send({
-        allClass,
-        classes,
-        StudentCount,
-        enrollmetCount,
-        classOverview,
-      });
+      res.send(result);
     });
+    app.get("/teacherCategory/:email", async (req, res) => {
+      const email = req.params.email;
+      const query = { email: email };
+      const teacher = await teacherRequestCollection.findOne(query);
+      console.log("category", teacher.category);
+      res.send(teacher.category);
+    });
+    // teacher stats
+    app.get(
+      "/teacher-home/:email",
+      verifyToken,
+      verifyTeacher,
+      async (req, res) => {
+        const email = req.params.email;
+        if (req.decoded.email !== email) {
+          return;
+        }
+        const query = { email: email, status: "approved" };
+        const allClass = await classCollection.countDocuments({ email: email });
+        const classes = await classCollection.countDocuments(query);
+        const students = await classCollection
+          .aggregate([
+            { $match: query },
+            {
+              $lookup: {
+                from: "payments",
+                localField: "_id",
+                foreignField: "classId",
+                as: "enrollments",
+              },
+            },
+            {
+              $unwind: "$enrollments",
+            },
+            {
+              $group: {
+                _id: "$enrollments.email",
+                totalStudents: {
+                  $sum: 1,
+                },
+              },
+            },
+          ])
+          .toArray();
+        const StudentCount = students.length > 0 ? students.length : 0;
+        const enrollmetCount = students.reduce(
+          (sum, student) => sum + student.totalStudents,
+          0
+        );
+        const classOverview = await classCollection
+          .aggregate([
+            { $match: query },
+            {
+              $lookup: {
+                from: "payments",
+                localField: "_id",
+                foreignField: "classId",
+                as: "enrollments",
+              },
+            },
+            {
+              $lookup: {
+                from: "reviews",
+                localField: "_id",
+                foreignField: "classId",
+                as: "reviews",
+              },
+            },
+            {
+              $lookup: {
+                from: "assignments",
+                localField: "_id",
+                foreignField: "classId",
+                as: "assignments",
+              },
+            },
+            {
+              $lookup: {
+                from: "assignmentSubmission",
+                localField: "_id",
+                foreignField: "classId",
+                as: "submissions",
+              },
+            },
+            {
+              $addFields: {
+                enrollmentCount: { $size: "$enrollments" },
+                reviewCount: {
+                  $size: "$reviews",
+                },
+                averageRating: {
+                  $avg: "$reviews.rating",
+                },
+                assignmentCount: {
+                  $size: "$assignments",
+                },
+                submissionCount: {
+                  $size: "$submissions",
+                },
+              },
+            },
+            {
+              $project: {
+                _id: 1,
+                title: 1,
+                image: 1,
+                enrollmentCount: 1,
+                reviewCount: 1,
+                averageRating: 1,
+                assignmentCount: 1,
+                submissionCount: 1,
+              },
+            },
+          ])
+
+          .toArray();
+
+        res.send({
+          allClass,
+          classes,
+          StudentCount,
+          enrollmetCount,
+          classOverview,
+        });
+      }
+    );
 
     /*****class related apis******/
 
@@ -508,7 +537,7 @@ async function run() {
       res.send(result);
     });
     app.get("/allClass", async (req, res) => {
-      const result = await classCollection.find().toArray();
+      const result = await classCollection.find().sort({ _id: -1 }).toArray();
       res.send(result);
     });
     app.patch("/class/:id", verifyToken, verifyTeacher, async (req, res) => {
@@ -530,6 +559,8 @@ async function run() {
     app.get("/class", async (req, res) => {
       const min = parseInt(req.query.min) || 0;
       const max = parseInt(req.query.max) || Infinity;
+      const teacher = req.query.teacher;
+
       const page = req.query.category === "All" ? parseInt(req.query.page) : 0;
       const size =
         req.query.category === "All" ? parseInt(req.query.size) : Infinity;
@@ -539,7 +570,9 @@ async function run() {
         title: { $regex: req.query.search || "", $options: "i" },
         price: { $lte: max, $gte: min }, //
       };
-
+      if (teacher) {
+        query.email = teacher;
+      }
       if (req.query?.category && req.query.category !== "All") {
         query.category = req.query.category;
       }
@@ -586,7 +619,7 @@ async function run() {
         res.send(result);
       }
     );
-    app.get("/classes/:email", verifyToken, async (req, res) => {
+    app.get("/classes/:email", verifyToken, verifyTeacher, async (req, res) => {
       const email = req.params.email;
       if (email !== req.decoded.email) {
         return res.status(403).send({ message: "unauthoriized access" });
@@ -680,7 +713,7 @@ async function run() {
       const result = await paymentCollection.find(query, options).toArray();
       res.send(result);
     });
-    // reviews related apis
+    /****reviews related apis****/
     app.post("/reviews", verifyToken, async (req, res) => {
       const review = req.body;
       review.classId = new ObjectId(review.classId);
@@ -689,17 +722,24 @@ async function run() {
     });
     app.get("/reviews/:classId", async (req, res) => {
       const classId = req.params.classId;
-      const query = { classId: classId };
+      const query = { classId: new ObjectId(classId) };
       const result = await reviewCollection.find(query).toArray();
       res.send(result);
     });
     app.get("/reviews", async (req, res) => {
-      const result = await reviewCollection.find().sort({ _id: -1 }).toArray();
+      // const reviews = await reviewCollection
+      const result = await reviewCollection
+        .find()
+        .sort({ rating: -1 })
+        .limit(10)
+        .toArray();
       res.send(result);
     });
     /*counting enrollments,assignments and asignment submissions*/
     app.get(
       "/teacher-stats/:id",
+      verifyToken,
+      verifyTeacher,
 
       async (req, res) => {
         const id = req.params.id;
@@ -719,7 +759,7 @@ async function run() {
       }
     );
 
-    //payment related apis
+    /****payment related apis****/
     app.post("/create-payment-intent", verifyToken, async (req, res) => {
       const { price } = req.body;
       const amount = parseInt(price * 100);
@@ -738,7 +778,7 @@ async function run() {
       const paymentResult = await paymentCollection.insertOne(payment);
       res.send(paymentResult);
     });
-    //admin related apis
+    /*****admin related apis****/
     app.get("/users/admin/:email", verifyToken, async (req, res) => {
       const email = req.params.email;
       const query = { email: email };
@@ -768,7 +808,10 @@ async function run() {
       res.send(result);
     });
     app.get("/bannerImage", async (req, res) => {
-      const result = await bannerImageCollection.find().toArray();
+      const result = await bannerImageCollection
+        .find()
+        .sort({ _id: -1 })
+        .toArray();
       res.send(result);
     });
     app.get("/admin-stats", verifyToken, verifyAdmin, async (req, res) => {
@@ -841,7 +884,101 @@ async function run() {
       });
       console.log("student count", totalRevenue);
     });
-    await client.db("admin").command({ ping: 1 });
+    //home page
+    app.get("/home-stats", async (req, res) => {
+      const userCount = await usersCollection.estimatedDocumentCount();
+      const classCount = await classCollection.countDocuments({
+        status: "approved",
+      });
+      const enrollmentCount = await paymentCollection.estimatedDocumentCount();
+      res.send({ userCount, classCount, enrollmentCount });
+    });
+    //categories
+    app.get("/categories", async (req, res) => {
+      const query = { status: "approved" };
+      const developmentClasses = await classCollection.countDocuments({
+        ...query,
+        category: "Web development",
+      });
+      const dataScienceClasses = await classCollection.countDocuments({
+        ...query,
+        category: "Data science",
+      });
+      const marketingClasses = await classCollection.countDocuments({
+        ...query,
+        category: "Digital marketing",
+      });
+      const devopsClasses = await classCollection.countDocuments({
+        ...query,
+        category: "DevOps",
+      });
+      const cryptoClasses = await classCollection.countDocuments({
+        ...query,
+        category: "Crypto",
+      });
+
+      const categories = await classCollection
+        .aggregate([
+          {
+            $match: query,
+          },
+          {
+            $lookup: {
+              from: "payments",
+              localField: "_id",
+              foreignField: "classId",
+              as: "enrollments",
+            },
+          },
+          {
+            $addFields: {
+              enrollmentCount: { $size: "$enrollments" },
+            },
+          },
+          {
+            $match: {
+              enrollmentCount: { $gt: 0 },
+            },
+          },
+          {
+            $sort: {
+              enrollmentCount: -1,
+            },
+          },
+          {
+            $group: {
+              _id: "$category",
+              classes: {
+                $push: {
+                  _id: "$_id",
+                  title: "$title",
+                  price: "$price",
+                  image: "$image",
+                  enrollmentCount: "$enrollmentCount",
+                },
+              },
+            },
+          },
+          {
+            $addFields: {
+              classes: {
+                $slice: ["$classes", 3],
+              },
+            },
+          },
+        ])
+        .toArray();
+
+      res.send({
+        categories,
+        developmentClasses,
+        dataScienceClasses,
+        cryptoClasses,
+        devopsClasses,
+        marketingClasses,
+      });
+    });
+    // await client.db("admin").command({ ping: 1 });
     console.log(
       "Pinged your deployment. You successfully connected to MongoDB!"
     );
