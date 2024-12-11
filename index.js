@@ -335,8 +335,9 @@ async function run() {
       return res.send({ status: "not_found" });
     });
 
-    app.get("/teacher/:email", verifyToken, async (req, res) => {
+    app.get("/teacher/:email", async (req, res) => {
       const email = req.params.email;
+      console.log("teacher", email);
       const query = { email: email };
       const result = await teacherRequestCollection.findOne(query);
       res.send(result);
@@ -559,7 +560,6 @@ async function run() {
     app.get("/class", async (req, res) => {
       const min = parseInt(req.query.min) || 0;
       const max = parseInt(req.query.max) || Infinity;
-      const teacher = req.query.teacher;
 
       const page = req.query.category === "All" ? parseInt(req.query.page) : 0;
       const size =
@@ -570,9 +570,7 @@ async function run() {
         title: { $regex: req.query.search || "", $options: "i" },
         price: { $lte: max, $gte: min }, //
       };
-      if (teacher) {
-        query.email = teacher;
-      }
+
       if (req.query?.category && req.query.category !== "All") {
         query.category = req.query.category;
       }
@@ -585,6 +583,13 @@ async function run() {
         .limit(size)
         .toArray();
       res.send({ result, classCount });
+    });
+    //class by teacher
+    app.get("/classByTeacher/:email", async (req, res) => {
+      const email = req.params.email;
+      const query = { email: email, status: "approved" };
+      const result = await classCollection.find(query).toArray();
+      res.send(result);
     });
 
     app.patch(
