@@ -247,6 +247,7 @@ async function run() {
       const request = req.body;
       const email = request.email;
       const filter = { email: email };
+      console.log('its here',email)
       const existingRequest = await teacherRequestCollection.findOne(filter);
       if (existingRequest) {
         const deleteLastRequest = await teacherRequestCollection.deleteOne(
